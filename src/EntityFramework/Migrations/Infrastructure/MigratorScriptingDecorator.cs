@@ -74,7 +74,10 @@ namespace System.Data.Entity.Migrations.Infrastructure
 
                     if (string.CompareOrdinal(sourceMigrationId, targetMigrationId) > 0)
                     {
-                        throw Error.DownScriptWindowsNotSupported();
+                        // BEGIN GALEN MODIFICATIONS
+                        //throw Error.DownScriptWindowsNotSupported();
+                        return ScriptUpdateDownward(sourceMigration, targetMigration);
+                        // END GALEN MODIFICATIONS
                     }
 
                     pendingMigrations = pendingMigrations.Where(m => string.CompareOrdinal(m, targetMigrationId) <= 0);
@@ -91,6 +94,40 @@ namespace System.Data.Entity.Migrations.Infrastructure
                 {
                     ExecuteStatements(base.GenerateStatements(new[] { _updateDatabaseOperation }, null));
                 }
+            }
+
+            return _sqlBuilder.ToString();
+        }
+
+        private string ScriptUpdateDownward(string sourceMigration, string targetMigration)
+        {
+            _sqlBuilder.Clear();
+
+            var targetMigrationId = GetMigrationId(targetMigration);
+            var sourceMigrationId = GetMigrationId(sourceMigration);
+
+            var pendingMigrations = GetLocalMigrations()
+                .Where(migrationId => (string.CompareOrdinal(targetMigrationId, migrationId) <= 0))
+                .ToList();
+
+            if (targetMigrationId == DbMigrator.InitialDatabase)
+            {
+                pendingMigrations.Add(DbMigrator.InitialDatabase);
+            }
+
+            pendingMigrations = pendingMigrations.OrderByDescending(migrationId => migrationId).ToList();
+
+            // TODO CGH Hmmm...what to do with this?
+            _updateDatabaseOperation
+                = sourceMigration == DbMigrator.InitialDatabase
+                        ? new UpdateDatabaseOperation(base.CreateDiscoveryQueryTrees().ToList())
+                        : null;
+
+            Downgrade(pendingMigrations);
+
+            if (_updateDatabaseOperation != null)
+            {
+                ExecuteStatements(base.GenerateStatements(new[] { _updateDatabaseOperation }, null));
             }
 
             return _sqlBuilder.ToString();

@@ -675,15 +675,25 @@ namespace System.Data.Entity.Migrations
                 var migration = _migrationAssembly.GetMigration(migrationId);
                 var nextMigrationId = pendingMigrations.ElementAt(i + 1);
 
-                string targetModelVersion = null;
+                // BEGIN GALEN MODIFICATIONS
                 var targetModel = (nextMigrationId != InitialDatabase)
-                                      ? _historyRepository.GetModel(nextMigrationId, out targetModelVersion)
+                    ? _migrationAssembly.GetMigration(nextMigrationId).GetTargetModel().Model
                     : _emptyModel.Value;
+
+                //string targetModelVersion = null;
+                // CGH Just assume this version for now:
+                string targetModelVersion = "6.2.0-61023";
+
+                //var targetModel = (nextMigrationId != InitialDatabase)
+                //                      ? _historyRepository.GetModel(nextMigrationId, out targetModelVersion)
+                //    : _emptyModel.Value;
 
                 Debug.Assert(targetModel != null);
 
-                string _;
-                var sourceModel = _historyRepository.GetModel(migrationId, out _);
+                //string _;
+                //var sourceModel = _historyRepository.GetModel(migrationId, out _);
+                var sourceModel = migration.GetTargetModel().Model;
+                // END GALEN MODIFICATIONS
 
                 if (migration == null)
                 {
