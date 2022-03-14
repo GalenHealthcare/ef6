@@ -394,6 +394,9 @@ namespace System.Data.Entity.Migrations.Design
                 var configuration = FindConfiguration();
                 OverrideConfiguration(configuration);
 
+                // CGH See if providing a valid connection string will get some of the errors to cease.  Taking this away probably won't hurt anything, but things outwardly seem to run smoother with it.
+                configuration.TargetDatabase = new DbConnectionInfo("Data Source=(localdb)\\mssqllocaldb;Initial Catalog=Galen.Ci.EntityFramework.Tests.TestContext.Data.TestDbContext;Integrated Security=True;Application Name=Galen.Ci.EntityFramework", "System.Data.SqlClient");
+
                 return configuration;
             }
 
