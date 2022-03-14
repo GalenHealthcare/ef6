@@ -7,6 +7,7 @@ namespace System.Data.Entity.Migrations.Infrastructure
     using System.Data.Entity.Migrations.Sql;
     using System.Data.Entity.Resources;
     using System.Data.Entity.Utilities;
+    using System.Diagnostics;
     using System.Linq;
     using System.Text;
 
@@ -17,9 +18,43 @@ namespace System.Data.Entity.Migrations.Infrastructure
     /// </summary>
     public class MigratorScriptingDecorator : MigratorBase
     {
+        private const string IndividualMigrationHeaderFormat = "-- >>> START Migration '{0}' Script <<< --";
+        private const string IndividualMigrationFooterFormat = "-- >>> END Migration {0} Script <<< --";
+        private const string FullUpwardMigrationHeaderFormat = "-- >>> START Full Migration Script <<< --";
+        private const string FullUpwardMigrationFooterFormat = "-- >>> END Full Migration Script <<< --";
+        private const string ScriptFileHeaderFormat =
+@"-- Generated Database Migration Script --
+/* 
+ * ContextType: {0}
+ * Generated At: {1:u}
+ *
+ * ContextKey: {2}
+ * Direction: {3}
+ * SourceMigrationId: {4}
+ * TargetMigrationId: {5}
+ * 
+ */
+
+-- >>> START Migration Script <<< --";
+
+        private const string ScriptFileFooterFormat =
+@"-- >>> END Migration Script <<< --
+/* 
+ * Script Generation Duration: {0}
+ *
+ * Total Migrations: {1}
+ * Total Statements: {2}
+ * 
+ */";
+
         private readonly StringBuilder _sqlBuilder = new StringBuilder();
 
         private UpdateDatabaseOperation _updateDatabaseOperation;
+
+        private readonly Stopwatch _stopwatch = new Stopwatch();
+
+        private int _totalMigrationsCount = 0;
+        private int _totalStatementsCount = 0;
 
         /// <summary>
         /// Initializes a new instance of the  MigratorScriptingDecorator class.
@@ -29,6 +64,59 @@ namespace System.Data.Entity.Migrations.Infrastructure
             : base(innerMigrator)
         {
             Check.NotNull(innerMigrator, "innerMigrator");
+        }
+
+        private void AppendScriptFileHeader(string directionDescription, string sourceMigrationId, string targetMigrationId)
+        {
+            var sourceMigrationIdDescription = string.IsNullOrEmpty(sourceMigrationId) 
+                ? DbMigrator.InitialDatabase 
+                : sourceMigrationId;
+
+            var targetMigrationIdDescription = string.IsNullOrEmpty(targetMigrationId)
+                ? "LATEST"
+                : targetMigrationId;
+
+            _sqlBuilder.AppendFormat(
+                ScriptFileHeaderFormat,
+                Configuration.ContextType,
+                DateTime.UtcNow,
+                Configuration.ContextKey,
+                directionDescription,
+                sourceMigrationIdDescription,
+                targetMigrationIdDescription);
+            _sqlBuilder.AppendLine();
+            _sqlBuilder.AppendLine();
+        }
+
+        private void AppendFullUpwardMigrationHeader()
+        {
+            _sqlBuilder.AppendFormat(FullUpwardMigrationHeaderFormat);
+            _sqlBuilder.AppendLine();
+        }
+
+        private void AppendFullUpwardMigrationFooter()
+        {
+            _sqlBuilder.AppendFormat(FullUpwardMigrationFooterFormat);
+            _sqlBuilder.AppendLine();
+        }
+
+        private void AppendIndividualMigrationHeader(string migrationId)
+        {
+            _sqlBuilder.AppendFormat(IndividualMigrationHeaderFormat, migrationId);
+            _sqlBuilder.AppendLine();
+        }
+
+        private void AppendIndividualMigrationFooter(string migrationId)
+        {
+            _sqlBuilder.AppendFormat(IndividualMigrationFooterFormat, migrationId);
+            _sqlBuilder.AppendLine();
+            _sqlBuilder.AppendLine();
+            _sqlBuilder.AppendLine();
+        }
+
+        private void AppendScriptFileFooter(TimeSpan scriptGenerationDuration, int totalMigrationsCount, int totalStatementsCount)
+        {
+            _sqlBuilder.AppendFormat(ScriptFileFooterFormat, scriptGenerationDuration, totalMigrationsCount, totalStatementsCount);
         }
 
         /// <summary>
@@ -45,7 +133,10 @@ namespace System.Data.Entity.Migrations.Infrastructure
         /// <returns> The generated SQL script. </returns>
         public string ScriptUpdate(string sourceMigration, string targetMigration)
         {
+            _stopwatch.Restart();
+
             _sqlBuilder.Clear();
+            AppendScriptFileHeader("Upward", sourceMigration, targetMigration);
 
             if (string.IsNullOrWhiteSpace(sourceMigration))
             {
@@ -92,22 +183,35 @@ namespace System.Data.Entity.Migrations.Infrastructure
 
                 if (_updateDatabaseOperation != null)
                 {
+                    _sqlBuilder.Clear();
+                    AppendScriptFileHeader("Full Upward", sourceMigration, targetMigration);
+                    AppendFullUpwardMigrationHeader();
                     ExecuteStatements(base.GenerateStatements(new[] { _updateDatabaseOperation }, null));
+                    AppendFullUpwardMigrationFooter();
                 }
             }
+
+            _stopwatch.Stop();
+
+            AppendScriptFileFooter(_stopwatch.Elapsed, _totalMigrationsCount, _totalStatementsCount);
 
             return _sqlBuilder.ToString();
         }
 
         private string ScriptUpdateDownward(string sourceMigration, string targetMigration)
         {
+            _stopwatch.Restart();
+
             _sqlBuilder.Clear();
+            AppendScriptFileHeader("Downward", sourceMigration, targetMigration);
 
             var targetMigrationId = GetMigrationId(targetMigration);
             var sourceMigrationId = GetMigrationId(sourceMigration);
 
             var pendingMigrations = GetLocalMigrations()
-                .Where(migrationId => (string.CompareOrdinal(targetMigrationId, migrationId) <= 0))
+                .Where(migrationId => 
+                    (string.CompareOrdinal(targetMigrationId, migrationId) <= 0) && 
+                    (string.CompareOrdinal(sourceMigrationId, migrationId) >= 0))
                 .ToList();
 
             if (targetMigrationId == DbMigrator.InitialDatabase)
@@ -117,18 +221,11 @@ namespace System.Data.Entity.Migrations.Infrastructure
 
             pendingMigrations = pendingMigrations.OrderByDescending(migrationId => migrationId).ToList();
 
-            // TODO CGH Hmmm...what to do with this?
-            _updateDatabaseOperation
-                = sourceMigration == DbMigrator.InitialDatabase
-                        ? new UpdateDatabaseOperation(base.CreateDiscoveryQueryTrees().ToList())
-                        : null;
-
             Downgrade(pendingMigrations);
 
-            if (_updateDatabaseOperation != null)
-            {
-                ExecuteStatements(base.GenerateStatements(new[] { _updateDatabaseOperation }, null));
-            }
+            _stopwatch.Stop();
+
+            AppendScriptFileFooter(_stopwatch.Elapsed, _totalMigrationsCount, _totalStatementsCount);
 
             return _sqlBuilder.ToString();
         }
@@ -153,9 +250,23 @@ namespace System.Data.Entity.Migrations.Infrastructure
             mustSucceedToKeepDatabase();
         }
 
-        internal override void ExecuteStatements(IEnumerable<MigrationStatement> migrationStatements)
+        internal override void ExecuteStatements(IEnumerable<MigrationStatement> migrationStatements, string migrationId = null)
         {
+            var isWriteIndividualMigrationHeaderAndFooter = migrationStatements.Any() && (!string.IsNullOrEmpty(migrationId));
+            if (isWriteIndividualMigrationHeaderAndFooter)
+            {
+                AppendIndividualMigrationHeader(migrationId);
+            }
+
             BuildSqlScript(migrationStatements, _sqlBuilder);
+
+            if (isWriteIndividualMigrationHeaderAndFooter)
+            {
+                AppendIndividualMigrationFooter(migrationId);
+            }
+
+            _totalMigrationsCount++;
+            _totalStatementsCount += migrationStatements.Count();
         }
 
         internal static void BuildSqlScript(IEnumerable<MigrationStatement> migrationStatements, StringBuilder sqlBuilder)

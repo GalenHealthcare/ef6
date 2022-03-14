@@ -960,7 +960,7 @@ namespace System.Data.Entity.Migrations
                         .Distinct((m1, m2) => string.Equals(m1.Sql, m2.Sql, StringComparison.Ordinal));
             }
 
-            base.ExecuteStatements(migrationStatements);
+            base.ExecuteStatements(migrationStatements, migrationId: migrationId);
 
             _historyRepository.ResetExists();
         }
@@ -978,7 +978,7 @@ namespace System.Data.Entity.Migrations
             return SqlGenerator.Generate(operations, _providerManifestToken);
         }
 
-        internal override void ExecuteStatements(IEnumerable<MigrationStatement> migrationStatements)
+        internal override void ExecuteStatements(IEnumerable<MigrationStatement> migrationStatements, string migrationId = null)
         {
             ExecuteStatements(migrationStatements, null);
         }
